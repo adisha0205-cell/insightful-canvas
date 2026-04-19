@@ -248,19 +248,36 @@ const Index = () => {
                   <div className="px-5 pb-4 flex-1">
                     <p className="text-sm text-muted-foreground leading-relaxed">💡 {c.tip}</p>
                   </div>
-                  <div className="px-5 py-3 border-t border-border flex items-center justify-between">
-                    <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-primary-soft text-primary">{c.marks}</span>
-                    <a
-                      href={c.notesUrl}
-                      target={c.notesUrl.startsWith("#") ? undefined : "_blank"}
-                      rel="noreferrer"
-                      className="text-xs font-medium text-info bg-info-soft border border-info-soft hover:bg-info hover:text-primary-foreground px-3 py-1.5 rounded-md inline-flex items-center gap-1.5 transition-colors"
-                    >
-                      <FileText className="w-3.5 h-3.5" /> View Notes
-                      {c.notesUrl.startsWith("#") && (
-                        <span className="text-[0.62rem] bg-foreground/10 px-1.5 py-0.5 rounded">Soon</span>
-                      )}
-                    </a>
+                  <div className="px-5 py-3 border-t border-border flex flex-col gap-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-primary-soft text-primary">{c.marks}</span>
+                      <a
+                        href={c.notesUrl}
+                        target={c.notesUrl.startsWith("#") ? undefined : "_blank"}
+                        rel="noreferrer"
+                        className="text-xs font-medium text-info bg-info-soft border border-info-soft hover:bg-info hover:text-primary-foreground px-3 py-1.5 rounded-md inline-flex items-center gap-1.5 transition-colors"
+                      >
+                        <FileText className="w-3.5 h-3.5" /> View Notes
+                        {c.notesUrl.startsWith("#") && (
+                          <span className="text-[0.62rem] bg-foreground/10 px-1.5 py-0.5 rounded">Soon</span>
+                        )}
+                      </a>
+                    </div>
+                    {c.extraNotes && c.extraNotes.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {c.extraNotes.map((n) => (
+                          <a
+                            key={n.url}
+                            href={n.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[0.7rem] font-medium text-primary bg-primary-soft hover:bg-primary hover:text-primary-foreground px-2.5 py-1 rounded-md inline-flex items-center gap-1 transition-colors"
+                          >
+                            <FileText className="w-3 h-3" /> {n.label}
+                          </a>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </article>
               );

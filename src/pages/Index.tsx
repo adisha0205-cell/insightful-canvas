@@ -336,7 +336,7 @@ const Index = () => {
       <footer className="bg-primary text-primary-foreground/70 text-center px-6 py-10 mt-8">
         <div className="font-display text-lg text-primary-foreground font-bold mb-1">BIO12 — CBSE Class 12 Biology Exam Guide</div>
         <p className="text-sm">All content based on NCERT syllabus · CBSE official guidelines · Board Exam 2025–26</p>
-        <p className="text-xs mt-2 text-primary-foreground/50">Notes links are editable — replace each chapter's <code>notesUrl</code> in <code>src/data/chapters.ts</code> as your notes go live.</p>
+        
       </footer>
     </div>
   );

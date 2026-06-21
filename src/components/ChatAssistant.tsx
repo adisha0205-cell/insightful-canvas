@@ -1,16 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 import { MessageCircle, X, Send, Loader2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
-const SESSION_KEY = "bio12_chat_session_id";
+const SESSION_KEY = "bio12_chat_session_v2";
+const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
+const AUTH = `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`;
+
+async function callChat(payload: Record<string, unknown>, stream = false) {
+  return fetch(CHAT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: AUTH },
+    body: JSON.stringify(payload),
+  });
+}
 
 export const ChatAssistant = () => {
   const [open, setOpen] = useState(false);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [session, setSession] = useState<{ id: string; token: string } | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -18,42 +27,42 @@ export const ChatAssistant = () => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Initialize session
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      let id = localStorage.getItem(SESSION_KEY);
-      if (!id) {
-        const { data, error } = await supabase
-          .from("chat_sessions")
-          .insert({})
-          .select("id")
-          .single();
-        if (error || !data) return;
-        id = data.id;
-        localStorage.setItem(SESSION_KEY, id);
-      }
-      if (cancelled) return;
-      setSessionId(id);
-      const { data: msgs } = await supabase
-        .from("chat_messages")
-        .select("role, content")
-        .eq("session_id", id)
-        .order("created_at", { ascending: true });
-      if (msgs && !cancelled) {
-        setMessages(
-          msgs
-            .filter((m) => m.role === "user" || m.role === "assistant")
-            .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))
-        );
+      try {
+        const stored = localStorage.getItem(SESSION_KEY);
+        let s = stored ? (JSON.parse(stored) as { id: string; token: string }) : null;
+        if (!s?.id || !s?.token) {
+          const res = await callChat({ action: "init" });
+          if (!res.ok) return;
+          const data = await res.json();
+          s = { id: data.sessionId, token: data.sessionToken };
+          localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+        }
+        if (cancelled) return;
+        setSession(s);
+        const histRes = await callChat({ action: "history", sessionId: s.id, sessionToken: s.token });
+        if (histRes.ok) {
+          const { messages: msgs } = await histRes.json();
+          if (!cancelled && Array.isArray(msgs)) {
+            setMessages(
+              msgs
+                .filter((m: Msg) => m.role === "user" || m.role === "assistant")
+                .map((m: Msg) => ({ role: m.role, content: m.content }))
+            );
+          }
+        } else if (histRes.status === 401) {
+          // Stale token — recreate
+          localStorage.removeItem(SESSION_KEY);
+        }
+      } catch {
+        // ignore init errors
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
-  // Auto-scroll
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, streamText, streaming, open]);
@@ -64,7 +73,7 @@ export const ChatAssistant = () => {
 
   const send = async () => {
     const text = input.trim();
-    if (!text || streaming || !sessionId) return;
+    if (!text || streaming || !session) return;
 
     const userMsg: Msg = { role: "user", content: text };
     const newMessages = [...messages, userMsg];
@@ -73,20 +82,12 @@ export const ChatAssistant = () => {
     setStreaming(true);
     setStreamText("");
 
-    // Persist user message
-    supabase.from("chat_messages").insert({ session_id: sessionId, role: "user", content: text });
-
     try {
-      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
-        body: JSON.stringify({
-          messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
-        }),
+      const res = await callChat({
+        action: "chat",
+        sessionId: session.id,
+        sessionToken: session.token,
+        messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
       });
 
       if (!res.ok || !res.body) {
@@ -120,19 +121,16 @@ export const ChatAssistant = () => {
               setStreamText(assembled);
             }
           } catch {
-            // ignore non-JSON keep-alive lines
+            // ignore
           }
         }
       }
 
       if (assembled) {
         setMessages((prev) => [...prev, { role: "assistant", content: assembled }]);
-        supabase
-          .from("chat_messages")
-          .insert({ session_id: sessionId, role: "assistant", content: assembled });
       }
     } catch (e) {
-      toast({ title: "Chat error", description: (e as Error).message, variant: "destructive" });
+      toast({ title: "Chat error", description: "Something went wrong", variant: "destructive" });
     } finally {
       setStreaming(false);
       setStreamText("");
@@ -149,7 +147,6 @@ export const ChatAssistant = () => {
 
   return (
     <>
-      {/* Floating button */}
       <button
         onClick={() => setOpen((o) => !o)}
         aria-label={open ? "Close chat assistant" : "Open chat assistant"}
@@ -158,10 +155,8 @@ export const ChatAssistant = () => {
         {open ? <X className="w-6 h-6" /> : <MessageCircle className="w-6 h-6" />}
       </button>
 
-      {/* Panel */}
       {open && (
         <div className="fixed bottom-24 right-6 z-50 w-[min(92vw,400px)] h-[min(75vh,600px)] bg-card border border-border rounded-2xl shadow-hover flex flex-col overflow-hidden animate-fade-up">
-          {/* Header */}
           <div className="bg-primary text-primary-foreground px-4 py-3 flex items-center gap-3">
             <div className="w-9 h-9 rounded-full bg-primary-glow/30 flex items-center justify-center">
               <MessageCircle className="w-5 h-5" />
@@ -172,7 +167,6 @@ export const ChatAssistant = () => {
             </div>
           </div>
 
-          {/* Messages */}
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-background">
             {messages.length === 0 && !streaming && (
               <div className="text-center text-sm text-muted-foreground py-8">
@@ -209,7 +203,6 @@ export const ChatAssistant = () => {
             )}
           </div>
 
-          {/* Composer */}
           <div className="border-t border-border p-3 bg-card">
             <div className="flex items-end gap-2">
               <textarea
@@ -220,11 +213,11 @@ export const ChatAssistant = () => {
                 rows={1}
                 placeholder="Ask about meiosis, PCR, ecosystems…"
                 className="flex-1 resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring max-h-32"
-                disabled={!sessionId}
+                disabled={!session}
               />
               <button
                 onClick={send}
-                disabled={streaming || !input.trim() || !sessionId}
+                disabled={streaming || !input.trim() || !session}
                 className="w-9 h-9 shrink-0 rounded-lg bg-primary text-primary-foreground hover:bg-primary-mid disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
                 aria-label="Send"
               >
